@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="生词本" />
+  <title>大字云端生词本</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+      background-color: #f8fafc;
+      color: #0f172a;
+      margin: 0;
+      padding: 0;
+      height: 100dvh;
+      overflow: hidden;
+      user-select: none;
+    }
+    .font-scale-normal { --word-size: 2.5rem; --phonetic-size: 1.35rem; --meaning-size: 1.5rem; }
+    .font-scale-large  { --word-size: 3.1rem; --phonetic-size: 1.6rem;  --meaning-size: 1.8rem; }
+    .font-scale-huge   { --word-size: 3.6rem; --phonetic-size: 1.85rem; --meaning-size: 2.1rem; }
+    .word-text     { font-size: var(--word-size); line-height: 1.15; word-break: break-word; }
+    .phonetic-text { font-size: var(--phonetic-size); font-family: "SF Mono", Menlo, monospace; }
+    .meaning-text  { font-size: var(--meaning-size); line-height: 1.4; }
+    .safe-top    { padding-top: max(0.5rem, env(safe-area-inset-top)); }
+    .safe-bottom { padding-bottom: max(0.5rem, env(safe-area-inset-bottom)); }
+  </style>
+</head>
+<body class="font-scale-normal flex flex-col h-[100dvh] w-full max-w-2xl mx-auto bg-slate-50">
+
+  <!-- 顶部控制栏 -->
+  <header class="bg-slate-900 text-white px-3 py-2 safe-top shrink-0 shadow-md z-10">
+    <div class="flex items-center justify-between gap-2 flex-wrap">
+      <!-- 字号切换 -->
+      <div class="flex bg-slate-800 rounded-lg p-0.5 text-xs font-bold">
+        <button onclick="setFontScale('normal')" id="btn-scale-normal" class="px-2.5 py-1 rounded-md bg-indigo-600 text-white">标准大字</button>
+        <button onclick="setFontScale('large')"  id="btn-scale-large"  class="px-2.5 py-1 rounded-md text-slate-300">A+ 特大</button>
+        <button onclick="setFontScale('huge')"   id="btn-scale-huge"   class="px-2.5 py-1 rounded-md text-slate-300">A++ 巨型</button>
+      </div>
+      <!-- 发音切换与自检 -->
+      <div class="flex items-center gap-1 text-xs font-bold">
+        <button onclick="setVoiceMode('us')" id="btn-voice-us" class="px-2 py-1 rounded bg-indigo-600 text-white">🇺🇸美音</button>
+        <button onclick="setVoiceMode('uk')" id="btn-voice-uk" class="px-2 py-1 rounded bg-slate-800 text-slate-300">🇬🇧英音</button>
+        <button onclick="setVoiceMode('tts')" id="btn-voice-tts" class="px-2 py-1 rounded bg-slate-800 text-slate-300">🤖系统</button>
+        <button onclick="testAudio()" class="px-2 py-1 rounded bg-amber-500 text-slate-950 font-extrabold">🔔测声音</button>
+      </div>
+    </div>
+    <!-- 语音状态反馈条 -->
+    <div id="audio-status" class="mt-1.5 text-xs bg-indigo-950/90 text-indigo-200 px-2.5 py-1 rounded flex items-center justify-between">
+      <span id="audio-status-text" class="truncate">🔊 语音就绪：点击卡片或发音按钮即可朗读</span>
+      <button onclick="speakCurrentWord()" class="text-amber-300 font-bold underline ml-2 shrink-0">重播</button>
+    </div>
+  </header>
+
+  <!-- 主内容区 -->
+  <main class="flex-1 overflow-y-auto p-3 flex flex-col">
+
+    <!-- 视图 1：背单词闪卡 -->
+    <section id="view-flashcard" class="flex-1 flex flex-col justify-between gap-3">
+      <!-- 顶部筛选与状态栏 -->
+      <div class="flex items-center justify-between bg-white px-3 py-2 rounded-xl shadow-sm border border-slate-200">
+        <div class="flex gap-1.5 text-sm font-bold">
+          <button onclick="setFilter('all')"      id="filter-all"      class="px-2.5 py-1 rounded-lg bg-indigo-600 text-white">全部</button>
+          <button onclick="setFilter('learning')" id="filter-learning" class="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700">待复习</button>
+          <button onclick="setFilter('mastered')" id="filter-mastered" class="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700">已掌握</button>
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="toggleAutoPlay()" id="btn-autoplay" class="text-xs font-bold px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800">🔊自动读: 开</button>
+          <span id="card-counter" class="text-sm font-extrabold text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-lg">0 / 0</span>
+        </div>
+      </div>
+
+      <!-- 核心大字闪卡 -->
+      <div onclick="flipCard()" class="flex-1 bg-white rounded-3xl shadow-md border-2 border-slate-200 p-6 flex flex-col items-center justify-center text-center relative cursor-pointer active:scale-[0.99] transition">
+        <span id="card-badge" class="absolute top-4 right-4 text-xs font-extrabold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800">待复习</span>
+        
+        <h1 id="card-word" class="word-text font-black text-slate-900 tracking-tight mb-3">Loading...</h1>
+        
+        <div id="card-phonetic" class="phonetic-text text-indigo-600 bg-indigo-50 px-4 py-1 rounded-xl font-semibold mb-4">/ ... /</div>
+
+        <button onclick="event.stopPropagation(); speakCurrentWord();" class="mb-5 px-6 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-extrabold text-lg shadow-md flex items-center gap-2">
+          <span>🔊 朗读发音</span>
+        </button>
+
+        <!-- 释义区（可点击翻转显隐） -->
+        <div id="card-back" class="w-full pt-4 border-t-2 border-dashed border-slate-200">
+          <p id="card-meaning" class="meaning-text font-bold text-slate-800 mb-2">中文释义加载中...</p>
+          <p id="card-example" class="text-base text-slate-500 italic"></p>
+        </div>
+        <p id="card-hint" class="text-xs text-slate-400 mt-3">💡 点击卡片空白处可隐藏/显示中文释义</p>
+      </div>
+
+      <!-- 底部大拇指操作按钮 -->
+      <div class="grid grid-cols-3 gap-2.5 shrink-0">
+        <button onclick="markWord('learning')" class="h-16 rounded-2xl bg-amber-500 active:bg-amber-600 text-white font-extrabold text-lg shadow flex flex-col items-center justify-center">
+          <span>🤔 还不熟</span>
+          <span class="text-xs font-normal opacity-90">留着再背</span>
+        </button>
+        <button onclick="nextCard()" class="h-16 rounded-2xl bg-slate-200 active:bg-slate-300 text-slate-800 font-extrabold text-lg shadow flex flex-col items-center justify-center">
+          <span>⏭️ 下一词</span>
+          <span class="text-xs font-normal text-slate-600">随机/顺序</span>
+        </button>
+        <button onclick="markWord('mastered')" class="h-16 rounded-2xl bg-emerald-600 active:bg-emerald-700 text-white font-extrabold text-lg shadow flex flex-col items-center justify-center">
+          <span>✅ 记住了</span>
+          <span class="text-xs font-normal opacity-90">标为已斩</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- 视图 2：词库表 -->
+    <section id="view-list" class="hidden flex-1 flex flex-col gap-3">
+      <div class="bg-white p-3 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between gap-2">
+        <input id="search-input" oninput="renderList()" type="text" placeholder="🔍 搜索英文或中文..." class="flex-1 px-3 py-2 rounded-xl border border-slate-300 text-base focus:outline-none focus:border-indigo-600" />
+        <button onclick="deduplicateWords(true)" class="px-3.5 py-2 rounded-xl bg-amber-500 text-white font-extrabold text-sm shrink-0 shadow-sm active:bg-amber-600">
+          🧹 一键去重
+        </button>
+      </div>
+      <div id="word-list-container" class="flex-1 overflow-y-auto space-y-2.5 pr-1"></div>
+    </section>
+
+    <!-- 视图 3：加新词 -->
+    <section id="view-add" class="hidden flex-1 flex flex-col gap-3">
+      <div class="bg-white p-5 rounded-3xl shadow-sm border border-slate-200 space-y-4">
+        <h2 class="text-xl font-black text-slate-900">➕ 添加 / 更新单词</h2>
+        <div>
+          <label class="block text-sm font-bold text-slate-700 mb-1">英文单词 *</label>
+          <div class="flex gap-2">
+            <input id="input-word" type="text" placeholder="例如: serendipity" class="flex-1 px-4 py-3 rounded-xl border-2 border-slate-300 text-xl font-bold focus:outline-none focus:border-indigo-600" />
+            <button onclick="autoFetchWordInfo()" id="btn-autofetch" class="px-4 py-3 rounded-xl bg-indigo-100 text-indigo-800 font-extrabold text-sm shrink-0">
+              ✨ 自动抓音标中文
+            </button>
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-bold text-slate-700 mb-1">国际音标（自动获取或手填）</label>
+          <input id="input-phonetic" type="text" placeholder="例如: /ˌser.ənˈdɪp.ə.ti/" class="w-full px-4 py-3 rounded-xl border border-slate-300 text-lg font-mono" />
+        </div>
+        <div>
+          <label class="block text-sm font-bold text-slate-700 mb-1">中文含义 *</label>
+          <input id="input-meaning" type="text" placeholder="例如: n. 意外发现珍奇事物的本领；机缘巧合" class="w-full px-4 py-3 rounded-xl border border-slate-300 text-lg font-bold" />
+        </div>
+        <div>
+          <label class="block text-sm font-bold text-slate-700 mb-1">例句 / 助记备注（选填）</label>
+          <textarea id="input-example" rows="2" placeholder="选填例句..." class="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-base"></textarea>
+        </div>
+        <button onclick="saveManualWord()" class="w-full py-4 rounded-2xl bg-indigo-600 active:bg-indigo-700 text-white font-black text-xl shadow-md">
+          💾 保存到生词本（同名自动合并去重）
+        </button>
+      </div>
+    </section>
+
+    <!-- 视图 4：Google Sheets 在线直连同步（仅保留此项） -->
+    <section id="view-sync" class="hidden flex-1 flex flex-col gap-3">
+      <div class="bg-white p-5 rounded-3xl shadow-sm border border-slate-200 space-y-4">
+        <div class="flex items-center justify-between">
+          <h2 class="text-xl font-black text-slate-900">📊 Google Sheets 在线直连同步</h2>
+          <span class="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800">自动过滤重复词</span>
+        </div>
+        <p class="text-sm text-slate-600 leading-relaxed">
+          只需在 Google Sheets 表格第 1 列填写<strong>英文单词</strong>（第 2 列中文、第 3 列音标选填，留空会自动联网补全）。将表格右上角「共享」权限设为<strong>“任何知道链接的人均可查看”</strong>，粘贴下方即可一键同步：
+        </p>
+        <div>
+          <label class="block text-sm font-bold text-slate-700 mb-1">Google Sheets 共享链接</label>
+          <input id="gsheet-url" type="url" value="https://docs.google.com/spreadsheets/d/1xLt1yZCLtiPL5JdzwTP5KwCRUepQH2Ru2dFzvJm2TEI/edit?usp=sharing" placeholder="https://docs.google.com/spreadsheets/d/..." class="w-full px-4 py-3 rounded-xl border-2 border-slate-300 text-base focus:outline-none focus:border-indigo-600" />
+        </div>
+        <button onclick="syncFromGoogleSheet()" id="btn-gsheet-sync" class="w-full py-4 rounded-2xl bg-emerald-600 active:bg-emerald-700 text-white font-black text-lg shadow-md flex items-center justify-center gap-2">
+          <span>🔄 从 Google Sheets 同步词库</span>
+        </button>
+        <div id="sync-log" class="text-sm font-bold text-indigo-700 bg-indigo-50 p-3 rounded-xl hidden"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- 底部大图标导航栏 -->
+  <nav class="bg-white border-t border-slate-200 px-2 pt-1.5 safe-bottom shrink-0 grid grid-cols-4 gap-1 z-10">
+    <button onclick="switchTab('flashcard')" id="tab-flashcard" class="py-2 rounded-xl flex flex-col items-center justify-center bg-indigo-50 text-indigo-700 font-extrabold">
+      <span class="text-xl">🗂️</span>
+      <span class="text-xs mt-0.5">背单词</span>
+    </button>
+    <button onclick="switchTab('list')" id="tab-list" class="py-2 rounded-xl flex flex-col items-center justify-center text-slate-600 font-bold">
+      <span class="text-xl">📖</span>
+      <span class="text-xs mt-0.5">词库表</span>
+    </button>
+    <button onclick="switchTab('add')" id="tab-add" class="py-2 rounded-xl flex flex-col items-center justify-center text-slate-600 font-bold">
+      <span class="text-xl">➕</span>
+      <span class="text-xs mt-0.5">加新词</span>
+    </button>
+    <button onclick="switchTab('sync')" id="tab-sync" class="py-2 rounded-xl flex flex-col items-center justify-center text-slate-600 font-bold">
+      <span class="text-xl">📊</span>
+      <span class="text-xs mt-0.5">Google同步</span>
+    </button>
+  </nav>
+
+  <script>
+    const STORAGE_KEY = 'mitch_vocab_words_v1';
+    const GSHEET_KEY  = 'mitch_vocab_gsheet_url';
+    const DEFAULT_GSHEET_URL = 'https://docs.google.com/spreadsheets/d/1xLt1yZCLtiPL5JdzwTP5KwCRUepQH2Ru2dFzvJm2TEI/edit?usp=sharing';
+
+    const DEFAULT_WORDS = [
+      { word: 'ubiquitous', phonetic: '/juːˈbɪk.wɪ.təs/', meaning: 'adj. 无所不在的；十分普遍的', example: 'Smartphones are ubiquitous in modern life.', status: 'learning', audio: '' },
+      { word: 'serendipity', phonetic: '/ˌser.ənˈdɪp.ə.ti/', meaning: 'n. 机缘巧合；意外发现珍宝的运气', example: 'Finding that rare paper was pure serendipity.', status: 'learning', audio: '' },
+      { word: 'ephemeral', phonetic: '/ɪˈfem.ər.əl/', meaning: 'adj. 短暂的；朝生暮死的', example: 'Fame in the internet age is often ephemeral.', status: 'learning', audio: '' },
+      { word: 'resilient', phonetic: '/rɪˈzɪl.i.ənt/', meaning: 'adj. 有弹性的；能迅速恢复的；坚韧的', example: 'Soft robotics requires highly resilient materials.', status: 'learning', audio: '' }
+    ];
+
+    let words = [];
+    let currentFilter = 'all';
+    let currentIndex = 0;
+    let showBack = true;
+    let voiceMode = 'us'; // 'us' | 'uk' | 'tts'
+    let autoPlay = true;
+    let sharedAudio = null;
+
+    // 初始化
+    window.addEventListener('DOMContentLoaded', () => {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        try { words = JSON.parse(saved); } catch (e) { words = [...DEFAULT_WORDS]; }
+      } else {
+        words = [...DEFAULT_WORDS];
+      }
+      deduplicateWords(false);
+      const savedUrl = localStorage.getItem(GSHEET_KEY);
+      document.getElementById('gsheet-url').value = savedUrl || DEFAULT_GSHEET_URL;
+      renderCard();
+    });
+
+    function saveToStorage() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(words));
+    }
+
+    // 智能去重（忽略大小写与首尾空格，保留更完整的信息和已掌握状态）
+    function deduplicateWords(notify = false) {
+      const beforeCount = words.length;
+      const map = new Map();
+      for (const item of words) {
+        if (!item || !item.word) continue;
+        const cleanWord = item.word.trim();
+        const key = cleanWord.toLowerCase();
+        if (!key) continue;
+        if (!map.has(key)) {
+          map.set(key, { ...item, word: cleanWord });
+        } else {
+          const existing = map.get(key);
+          map.set(key, {
+            word: existing.word,
+            phonetic: item.phonetic || existing.phonetic || '',
+            meaning: item.meaning || existing.meaning || '',
+            example: item.example || existing.example || '',
+            audio: item.audio || existing.audio || '',
+            status: (existing.status === 'mastered' || item.status === 'mastered') ? 'mastered' : 'learning'
+          });
+        }
+      }
+      words = Array.from(map.values());
+      saveToStorage();
+      const removed = beforeCount - words.length;
+      if (notify) {
+        updateAudioStatus(removed > 0 ? `🧹 已清理 ${removed} 个重复单词！当前共 ${words.length} 词` : `✨ 词库非常干净，没有重复单词（共 ${words.length} 词）`);
+        renderList();
+        renderCard();
+      }
+      return removed;
+    }
+
+    // 视图切换
+    function switchTab(tab) {
+      ['flashcard', 'list', 'add', 'sync'].forEach(t => {
+        document.getElementById(`view-${t}`).classList.toggle('hidden', t !== tab);
+        const btn = document.getElementById(`tab-${t}`);
+        if (t === tab) {
+          btn.className = 'py-2 rounded-xl flex flex-col items-center justify-center bg-indigo-50 text-indigo-700 font-extrabold';
+        } else {
+          btn.className = 'py-2 rounded-xl flex flex-col items-center justify-center text-slate-600 font-bold';
+        }
+      });
+      if (tab === 'flashcard') renderCard();
+      if (tab === 'list') renderList();
+    }
+
+    // 字号切换
+    function setFontScale(scale) {
+      document.body.classList.remove('font-scale-normal', 'font-scale-large', 'font-scale-huge');
+      document.body.classList.add(`font-scale-${scale}`);
+      ['normal', 'large', 'huge'].forEach(s => {
+        const btn = document.getElementById(`btn-scale-${s}`);
+        btn.className = s === scale ? 'px-2.5 py-1 rounded-md bg-indigo-600 text-white' : 'px-2.5 py-1 rounded-md text-slate-300';
+      });
+    }
+
+    // 发音模式切换
+    function setVoiceMode(mode) {
+      voiceMode = mode;
+      ['us', 'uk', 'tts'].forEach(m => {
+        const btn = document.getElementById(`btn-voice-${m}`);
+        btn.className = m === mode ? 'px-2 py-1 rounded bg-indigo-600 text-white' : 'px-2 py-1 rounded bg-slate-800 text-slate-300';
+      });
+      speakCurrentWord();
+    }
+
+    function toggleAutoPlay() {
+      autoPlay = !autoPlay;
+      const btn = document.getElementById('btn-autoplay');
+      btn.textContent = `🔊自动读: ${autoPlay ? '开' : '关'}`;
+      btn.className = autoPlay ? 'text-xs font-bold px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800' : 'text-xs font-bold px-2.5 py-1 rounded-lg bg-slate-200 text-slate-600';
+    }
+
+    function updateAudioStatus(msg) {
+      document.getElementById('audio-status-text').textContent = msg;
+    }
+
+    // 四重防静音语音引擎
+    function speakWord(wordText, customAudioUrl = '') {
+      if (!wordText) return;
+      const clean = wordText.trim();
+      updateAudioStatus(`🔊 正在朗读: "${clean}" ...`);
+
+      if (voiceMode === 'tts') {
+        playSystemTTS(clean);
+        return;
+      }
+
+      const type = voiceMode === 'uk' ? 1 : 2;
+      const youdaoUrl = `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(clean)}&type=${type}`;
+      const urlsToTry = [youdaoUrl];
+      if (customAudioUrl) urlsToTry.push(customAudioUrl);
+
+      tryPlayAudioUrls(urlsToTry, 0, clean);
+    }
+
+    function tryPlayAudioUrls(urls, idx, fallbackWord) {
+      if (idx >= urls.length) {
+        playSystemTTS(fallbackWord);
+        return;
+      }
+      try {
+        if (sharedAudio) { sharedAudio.pause(); }
+        sharedAudio = new Audio();
+        sharedAudio.referrerPolicy = 'no-referrer';
+        sharedAudio.src = urls[idx];
+        const playPromise = sharedAudio.play();
+        if (playPromise !== undefined) {
+          playPromise.then(() => {
+            updateAudioStatus(`✅ 已播报真人${voiceMode === 'uk' ? '英音' : '美音'}: "${fallbackWord}"`);
+          }).catch(() => {
+            tryPlayAudioUrls(urls, idx + 1, fallbackWord);
+          });
+        }
+        sharedAudio.onerror = () => tryPlayAudioUrls(urls, idx + 1, fallbackWord);
+      } catch (e) {
+        tryPlayAudioUrls(urls, idx + 1, fallbackWord);
+      }
+    }
+
+    function playSystemTTS(text) {
+      if (!('speechSynthesis' in window)) {
+        updateAudioStatus('⚠️ 当前浏览器不支持系统语音');
+        return;
+      }
+      window.speechSynthesis.cancel();
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = voiceMode === 'uk' ? 'en-GB' : 'en-US';
+      utter.rate = 0.92;
+      utter.onend = () => updateAudioStatus(`✅ 系统语音已播报: "${text}"`);
+      utter.onerror = () => updateAudioStatus(`⚠️ 语音播放受阻，请点击顶部“测声音”解锁`);
+      window.speechSynthesis.speak(utter);
+    }
+
+    function testAudio() {
+      speakWord('serendipity');
+    }
+
+    function speakCurrentWord() {
+      const list = getFilteredWords();
+      if (!list.length) return;
+      const item = list[currentIndex % list.length];
+      speakWord(item.word, item.audio);
+    }
+
+    // 闪卡逻辑
+    function getFilteredWords() {
+      if (currentFilter === 'all') return words;
+      return words.filter(w => w.status === currentFilter);
+    }
+
+    function setFilter(filter) {
+      currentFilter = filter;
+      currentIndex = 0;
+      ['all', 'learning', 'mastered'].forEach(f => {
+        const btn = document.getElementById(`filter-${f}`);
+        btn.className = f === filter ? 'px-2.5 py-1 rounded-lg bg-indigo-600 text-white' : 'px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700';
+      });
+      renderCard();
+    }
+
+    function renderCard(triggerSpeak = false) {
+      const list = getFilteredWords();
+      const counter = document.getElementById('card-counter');
+      if (!list.length) {
+        counter.textContent = '0 / 0';
+        document.getElementById('card-word').textContent = '暂无单词';
+        document.getElementById('card-phonetic').textContent = '/ - /';
+        document.getElementById('card-meaning').textContent = '请切换筛选状态，或点击底部「加新词 / Google同步」添加';
+        document.getElementById('card-example').textContent = '';
+        return;
+      }
+      if (currentIndex >= list.length) currentIndex = 0;
+      const item = list[currentIndex];
+      counter.textContent = `${currentIndex + 1} / ${list.length}`;
+      document.getElementById('card-word').textContent = item.word;
+      document.getElementById('card-phonetic').textContent = item.phonetic || '/ 暂无音标 /';
+      document.getElementById('card-meaning').textContent = item.meaning || '（暂无释义）';
+      document.getElementById('card-example').textContent = item.example || '';
+
+      const badge = document.getElementById('card-badge');
+      if (item.status === 'mastered') {
+        badge.textContent = '✅ 已掌握';
+        badge.className = 'absolute top-4 right-4 text-xs font-extrabold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800';
+      } else {
+        badge.textContent = '🔥 待复习';
+        badge.className = 'absolute top-4 right-4 text-xs font-extrabold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800';
+      }
+
+      document.getElementById('card-back').style.opacity = showBack ? '1' : '0.04';
+      if (triggerSpeak && autoPlay) speakWord(item.word, item.audio);
+    }
+
+    function flipCard() {
+      showBack = !showBack;
+      document.getElementById('card-back').style.opacity = showBack ? '1' : '0.04';
+    }
+
+    function nextCard() {
+      const list = getFilteredWords();
+      if (!list.length) return;
+      currentIndex = (currentIndex + 1) % list.length;
+      renderCard(true);
+    }
+
+    function markWord(status) {
+      const list = getFilteredWords();
+      if (!list.length) return;
+      const currentWord = list[currentIndex].word.toLowerCase();
+      const target = words.find(w => w.word.toLowerCase() === currentWord);
+      if (target) target.status = status;
+      saveToStorage();
+      nextCard();
+    }
+
+    // 联网自动抓取音标与中文释义
+    async function fetchDictionaryData(word) {
+      const clean = word.trim();
+      let phonetic = '';
+      let audio = '';
+      let meaning = '';
+      let example = '';
+
+      try {
+        const res = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(clean)}`);
+        if (res.ok) {
+          const data = await res.json();
+          const entry = data[0];
+          phonetic = entry.phonetic || (entry.phonetics?.find(p => p.text)?.text) || '';
+          audio = entry.phonetics?.find(p => p.audio)?.audio || '';
+          const firstDef = entry.meanings?.[0]?.definitions?.[0];
+          if (firstDef?.example) example = firstDef.example;
+        }
+      } catch (e) {}
+
+      try {
+        const transRes = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(clean)}&langpair=en|zh-CN`);
+        if (transRes.ok) {
+          const transData = await transRes.json();
+          meaning = transData?.responseData?.translatedText || '';
+        }
+      } catch (e) {}
+
+      return { phonetic, audio, meaning, example };
+    }
+
+    async function autoFetchWordInfo() {
+      const wordInput = document.getElementById('input-word').value.trim();
+      if (!wordInput) { alert('请先输入英文单词'); return; }
+      const btn = document.getElementById('btn-autofetch');
+      btn.textContent = '⏳ 抓取中...';
+      const info = await fetchDictionaryData(wordInput);
+      if (info.phonetic) document.getElementById('input-phonetic').value = info.phonetic;
+      if (info.meaning)  document.getElementById('input-meaning').value = info.meaning;
+      if (info.example && !document.getElementById('input-example').value) {
+        document.getElementById('input-example').value = info.example;
+      }
+      btn.textContent = '✨ 自动抓音标中文';
+      speakWord(wordInput, info.audio);
+    }
+
+    function saveManualWord() {
+      const word = document.getElementById('input-word').value.trim();
+      const phonetic = document.getElementById('input-phonetic').value.trim();
+      const meaning = document.getElementById('input-meaning').value.trim();
+      const example = document.getElementById('input-example').value.trim();
+      if (!word || !meaning) { alert('请填写英文单词和中文含义（可点击自动抓取）'); return; }
+
+      words.unshift({ word, phonetic, meaning, example, status: 'learning', audio: '' });
+      deduplicateWords(false);
+      document.getElementById('input-word').value = '';
+      document.getElementById('input-phonetic').value = '';
+      document.getElementById('input-meaning').value = '';
+      document.getElementById('input-example').value = '';
+      updateAudioStatus(`✅ 已保存单词 "${word}"（同名已自动去重）`);
+      switchTab('flashcard');
+    }
+
+    // 渲染词库列表
+    function renderList() {
+      const q = (document.getElementById('search-input')?.value || '').trim().toLowerCase();
+      const container = document.getElementById('word-list-container');
+      const filtered = words.filter(w => !q || w.word.toLowerCase().includes(q) || (w.meaning && w.meaning.includes(q)));
+
+      if (!filtered.length) {
+        container.innerHTML = `<div class="text-center text-slate-400 py-10">没有找到匹配的单词</div>`;
+        return;
+      }
+
+      container.innerHTML = filtered.map(item => `
+        <div class="bg-white p-3.5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between gap-3">
+          <div class="min-w-0 flex-1" onclick="speakWord('${item.word.replace(/'/g, "\\'")}')">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-xl font-black text-slate-900">${item.word}</span>
+              <span class="text-sm font-mono text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">${item.phonetic || ''}</span>
+              <span class="text-xs px-2 py-0.5 rounded-full font-bold ${item.status === 'mastered' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}">
+                ${item.status === 'mastered' ? '已掌握' : '待复习'}
+              </span>
+            </div>
+            <p class="text-base font-bold text-slate-700 mt-1 truncate">${item.meaning || ''}</p>
+          </div>
+          <div class="flex items-center gap-1.5 shrink-0">
+            <button onclick="speakWord('${item.word.replace(/'/g, "\\'")}')" class="p-2.5 rounded-xl bg-indigo-50 text-indigo-700 font-bold">🔊</button>
+            <button onclick="deleteWord('${item.word.replace(/'/g, "\\'")}')" class="p-2.5 rounded-xl bg-rose-50 text-rose-600 font-bold">🗑️</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function deleteWord(wordText) {
+      words = words.filter(w => w.word.toLowerCase() !== wordText.toLowerCase());
+      saveToStorage();
+      renderList();
+    }
+
+    // Google Sheets 在线直连同步（支持自动去重与缺失音标释义补全）
+    function parseCSV(text) {
+      const rows = [];
+      let row = [], cur = '', inQuotes = false;
+      for (let i = 0; i < text.length; i++) {
+        const ch = text[i], next = text[i + 1];
+        if (inQuotes) {
+          if (ch === '"' && next === '"') { cur += '"'; i++; }
+          else if (ch === '"') inQuotes = false;
+          else cur += ch;
+        } else {
+          if (ch === '"') inQuotes = true;
+          else if (ch === ',') { row.push(cur.trim()); cur = ''; }
+          else if (ch === '\n' || (ch === '\r' && next === '\n')) {
+            if (ch === '\r') i++;
+            row.push(cur.trim()); rows.push(row); row = []; cur = '';
+          } else cur += ch;
+        }
+      }
+      if (cur || row.length) { row.push(cur.trim()); rows.push(row); }
+      return rows;
+    }
+
+    async function syncFromGoogleSheet() {
+      const rawUrl = document.getElementById('gsheet-url').value.trim();
+      const logBox = document.getElementById('sync-log');
+      if (!rawUrl) { alert('请粘贴 Google Sheets 共享链接'); return; }
+
+      const match = rawUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+      if (!match) { alert('链接格式不正确，请复制包含 /spreadsheets/d/... 的完整 Google 表格链接'); return; }
+
+      localStorage.setItem(GSHEET_KEY, rawUrl);
+      const sheetId = match[1];
+      const gidMatch = rawUrl.match(/[#&?]gid=([0-9]+)/);
+      const gid = gidMatch ? gidMatch[1] : '0';
+      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`;
+
+      logBox.classList.remove('hidden');
+      logBox.textContent = '⏳ 正在连接 Google Sheets 拉取词表...';
+
+      try {
+        const res = await fetch(csvUrl);
+        if (!res.ok) throw new Error('无法读取表格，请确认共享权限已设为“任何知道链接的人均可查看”');
+        const csvText = await res.text();
+        const rows = parseCSV(csvText).filter(r => r.length && r[0]);
+
+        let addedOrUpdated = 0;
+        for (let i = 0; i < rows.length; i++) {
+          const [c0, c1 = '', c2 = '', c3 = ''] = rows[i];
+          if (i === 0 && /^(word|英文|单词)$/i.test(c0)) continue;
+          const w = c0.trim();
+          if (!w) continue;
+
+          let meaning = c1.trim();
+          let phonetic = c2.trim();
+          let example = c3.trim();
+
+          if (!meaning || !phonetic) {
+            logBox.textContent = `⏳ 正在自动补全 "${w}" 的音标与释义 (${i + 1}/${rows.length})...`;
+            const fetched = await fetchDictionaryData(w);
+            if (!phonetic) phonetic = fetched.phonetic;
+            if (!meaning)  meaning  = fetched.meaning || '（待补充释义）';
+            if (!example)  example  = fetched.example;
+          }
+
+          words.push({ word: w, meaning, phonetic, example, status: 'learning', audio: '' });
+          addedOrUpdated++;
+        }
+
+        const dupRemoved = deduplicateWords(false);
+        logBox.textContent = `✅ 同步成功！共处理 ${addedOrUpdated} 行，自动合并去重 ${dupRemoved} 项，当前词库共 ${words.length} 词。`;
+        renderCard();
+      } catch (err) {
+        logBox.textContent = `❌ 同步失败：${err.message}`;
+      }
+    }
+  </script>
+</body>
+</html>
